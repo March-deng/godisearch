@@ -1,8 +1,10 @@
 package redisearch
 
 import (
-	"github.com/gomodule/redigo/redis"
+	"context"
 	"strconv"
+
+	"github.com/gomodule/redigo/redis"
 )
 
 // Autocompleter implements a redisearch auto-completer API
@@ -27,17 +29,23 @@ func NewAutocompleter(addr, name string) *Autocompleter {
 }
 
 // Delete deletes the Autocompleter key for this AC
-func (a *Autocompleter) Delete() error {
-	conn := a.pool.Get()
+func (a *Autocompleter) Delete(ctx context.Context) error {
+	conn, err := a.pool.GetContext(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 
-	_, err := conn.Do("DEL", a.name)
+	_, err = conn.Do("DEL", a.name)
 	return err
 }
 
 // AddTerms pushes new term suggestions to the index
-func (a *Autocompleter) AddTerms(terms ...Suggestion) error {
-	conn := a.pool.Get()
+func (a *Autocompleter) AddTerms(ctx context.Context, terms ...Suggestion) error {
+	conn, err := a.pool.GetContext(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 
 	i := 0
@@ -69,8 +77,11 @@ func (a *Autocompleter) AddTerms(terms ...Suggestion) error {
 }
 
 // DeleteTerms deletes term suggestions from the index
-func (a *Autocompleter) DeleteTerms(terms ...Suggestion) error {
-	conn := a.pool.Get()
+func (a *Autocompleter) DeleteTerms(ctx context.Context, terms ...Suggestion) error {
+	conn, err := a.pool.GetContext(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 
 	i := 0
@@ -95,8 +106,11 @@ func (a *Autocompleter) DeleteTerms(terms ...Suggestion) error {
 }
 
 // Length gets the size of the suggestion
-func (a *Autocompleter) Length() (len int64, err error) {
-	conn := a.pool.Get()
+func (a *Autocompleter) Length(ctx context.Context) (len int64, err error) {
+	conn, err := a.pool.GetContext(ctx)
+	if err != nil {
+		return 0, err
+	}
 	defer conn.Close()
 	len, err = redis.Int64(conn.Do("FT.SUGLEN", a.name))
 	return
@@ -107,8 +121,11 @@ func (a *Autocompleter) Length() (len int64, err error) {
 // given prefix
 //
 // Deprecated: Please use SuggestOpts() instead
-func (a *Autocompleter) Suggest(prefix string, num int, fuzzy bool) (ret []Suggestion, err error) {
-	conn := a.pool.Get()
+func (a *Autocompleter) Suggest(ctx context.Context, prefix string, num int, fuzzy bool) (ret []Suggestion, err error) {
+	conn, err := a.pool.GetContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 
 	seropts := DefaultSuggestOptions
@@ -130,8 +147,11 @@ func (a *Autocompleter) Suggest(prefix string, num int, fuzzy bool) (ret []Sugge
 // SuggestOptions are passed allowing you specify if the returned values contain a payload, and scores.
 // If SuggestOptions.Fuzzy is set, we also complete for prefixes that are in 1 Levenshtein distance
 // from the given prefix
-func (a *Autocompleter) SuggestOpts(prefix string, opts SuggestOptions) (ret []Suggestion, err error) {
-	conn := a.pool.Get()
+func (a *Autocompleter) SuggestOpts(ctx context.Context, prefix string, opts SuggestOptions) (ret []Suggestion, err error) {
+	conn, err := a.pool.GetContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 
 	args, inc := a.Serialize(prefix, opts)

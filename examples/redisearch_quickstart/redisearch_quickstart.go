@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -13,6 +14,7 @@ import (
  * Update at: https://github.com/RediSearch/RediSearch/blob/master/docs/go_client.md
  */
 func main() {
+	ctx := context.Background()
 	// Create a client. By default a client is schemaless
 	// unless a schema is provided when creating the index
 	c := redisearch.NewClient("localhost:6379", "myIndex")
@@ -24,10 +26,10 @@ func main() {
 		AddField(redisearch.NewNumericField("date"))
 
 	// Drop an existing index. If the index does not exist an error is returned
-	c.Drop()
+	c.Drop(ctx)
 
 	// Create the index with the given schema
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(context.Background(), sc); err != nil {
 		log.Fatal(err)
 	}
 
@@ -38,12 +40,12 @@ func main() {
 		Set("date", time.Now().Unix())
 
 	// Index the document. The API accepts multiple documents at a time
-	if err := c.IndexOptions(redisearch.DefaultIndexingOptions, doc); err != nil {
+	if err := c.IndexOptions(ctx, redisearch.DefaultIndexingOptions, doc); err != nil {
 		log.Fatal(err)
 	}
 
 	// Searching with limit and sorting
-	docs, total, err := c.Search(redisearch.NewQuery("hello world").
+	docs, total, err := c.Search(ctx, redisearch.NewQuery("hello world").
 		Limit(0, 2).
 		SetReturnFields("title"))
 

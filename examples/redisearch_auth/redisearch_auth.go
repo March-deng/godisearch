@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 // exemplifies the NewClientFromPool function
 func main() {
+	ctx := context.Background()
 	host := "localhost:6379"
 	password := ""
 	pool := &redis.Pool{Dial: func() (redis.Conn, error) {
@@ -25,10 +27,10 @@ func main() {
 		AddField(redisearch.NewNumericField("date"))
 
 	// Drop an existing index. If the index does not exist an error is returned
-	c.Drop()
+	c.Drop(ctx)
 
 	// Create the index with the given schema
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(ctx, sc); err != nil {
 		log.Fatal(err)
 	}
 
@@ -39,12 +41,12 @@ func main() {
 		Set("date", time.Now().Unix())
 
 	// Index the document. The API accepts multiple documents at a time
-	if err := c.Index([]redisearch.Document{doc}...); err != nil {
+	if err := c.Index(ctx, []redisearch.Document{doc}...); err != nil {
 		log.Fatal(err)
 	}
 
 	// Searching with limit and sorting
-	docs, total, err := c.Search(redisearch.NewQuery("hello world").
+	docs, total, err := c.Search(ctx, redisearch.NewQuery("hello world").
 		Limit(0, 2).
 		SetReturnFields("title"))
 

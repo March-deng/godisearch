@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
@@ -79,6 +80,8 @@ func main() {
 		)
 	}}
 
+	ctx := context.Background()
+
 	c := redisearch.NewClientFromPool(pool, "search-client-1")
 
 	// Create a schema
@@ -88,10 +91,10 @@ func main() {
 		AddField(redisearch.NewNumericField("date"))
 
 	// Drop an existing index. If the index does not exist an error is returned
-	c.Drop()
+	c.Drop(ctx)
 
 	// Create the index with the given schema
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(context.Background(), sc); err != nil {
 		log.Fatal(err)
 	}
 
@@ -102,12 +105,12 @@ func main() {
 		Set("date", time.Now().Unix())
 
 	// Index the document. The API accepts multiple documents at a time
-	if err := c.Index([]redisearch.Document{doc}...); err != nil {
+	if err := c.Index(ctx, []redisearch.Document{doc}...); err != nil {
 		log.Fatal(err)
 	}
 
 	// Searching with limit and sorting
-	docs, total, err := c.Search(redisearch.NewQuery("hello world").
+	docs, total, err := c.Search(ctx, redisearch.NewQuery("hello world").
 		Limit(0, 2).
 		SetReturnFields("title"))
 

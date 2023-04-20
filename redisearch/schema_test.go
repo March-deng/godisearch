@@ -1,11 +1,13 @@
 package redisearch
 
 import (
-	"github.com/gomodule/redigo/redis"
-	"github.com/stretchr/testify/assert"
+	"context"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/gomodule/redigo/redis"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewSchema(t *testing.T) {
@@ -139,7 +141,10 @@ func TestSchema_SkipInitialScan(t *testing.T) {
 		return
 	}
 
-	vanillaConnection := c.pool.Get()
+	ctx := context.Background()
+
+	vanillaConnection, err := c.pool.Get(ctx)
+	assert.Nil(t, err)
 	_, err = vanillaConnection.Do("HSET", "create-index-info:doc1", "name", "Jon", "age", 25)
 	assert.Nil(t, err)
 
@@ -149,25 +154,25 @@ func TestSchema_SkipInitialScan(t *testing.T) {
 	indexDefinition := NewIndexDefinition()
 
 	c = createClient("skip-initial-scan-test-scan")
-	c.CreateIndexWithIndexDefinition(schema1, indexDefinition)
+	c.CreateIndexWithIndexDefinition(context.Background(), schema1, indexDefinition)
 	assert.Nil(t, err)
 
 	// Wait for all documents to be indexed
-	info, err := c.Info()
+	info, err := c.Info(ctx)
 	assert.Nil(t, err)
 	for info.IsIndexing {
 		time.Sleep(time.Second)
-		info, _ = c.Info()
+		info, _ = c.Info(ctx)
 	}
 
-	_, total, err := c.Search(q)
+	_, total, err := c.Search(ctx, q)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, total)
 
 	c = createClient("skip-initial-scan-test-skip-scan")
-	c.CreateIndexWithIndexDefinition(schema2, indexDefinition)
+	c.CreateIndexWithIndexDefinition(context.Background(), schema2, indexDefinition)
 	assert.Nil(t, err)
-	_, total, err = c.Search(q)
+	_, total, err = c.Search(ctx, q)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, total)
 }
@@ -179,16 +184,16 @@ func TestSchema_SummarizationDisabled(t *testing.T) {
 	flush(c)
 	schema := NewSchema(Options{NoOffsetVectors: true}).AddField(NewTextField("body"))
 
-	c.CreateIndex(schema)
-	assert.Nil(t, c.IndexOptions(DefaultIndexingOptions, doc))
-	_, _, err := c.Search(NewQuery("body").Summarize())
+	c.CreateIndex(context.Background(), schema)
+	assert.Nil(t, c.IndexOptions(context.Background(), DefaultIndexingOptions, doc))
+	_, _, err := c.Search(context.Background(), NewQuery("body").Summarize())
 	assert.NotNil(t, err)
 
 	c = createClient("summarize-disable-no-highlights-test")
 	flush(c)
 	schema = NewSchema(Options{NoHighlights: true}).AddField(NewTextField("body"))
-	c.CreateIndex(schema)
-	assert.Nil(t, c.IndexOptions(DefaultIndexingOptions, doc))
-	_, _, err = c.Search(NewQuery("body").Summarize())
+	c.CreateIndex(context.Background(), schema)
+	assert.Nil(t, c.IndexOptions(context.Background(), DefaultIndexingOptions, doc))
+	_, _, err = c.Search(context.Background(), NewQuery("body").Summarize())
 	assert.NotNil(t, err)
 }

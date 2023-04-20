@@ -1,6 +1,7 @@
-package redisearch_test
+package redisearch
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/RediSearch/redisearch-go/v2/redisearch"
 	"github.com/gomodule/redigo/redis"
 )
 
@@ -17,42 +17,42 @@ import (
 func ExampleNewClient() {
 	// Create a client. By default a client is schemaless
 	// unless a schema is provided when creating the index
-	c := redisearch.NewClient("localhost:6379", "myIndex")
+	c := NewClient("localhost:6379", "myIndex")
 
 	// Create a schema
-	sc := redisearch.NewSchema(redisearch.DefaultOptions).
-		AddField(redisearch.NewTextField("body")).
-		AddField(redisearch.NewTextFieldOptions("title", redisearch.TextFieldOptions{Weight: 5.0, Sortable: true})).
-		AddField(redisearch.NewNumericField("date"))
+	sc := NewSchema(DefaultOptions).
+		AddField(NewTextField("body")).
+		AddField(NewTextFieldOptions("title", TextFieldOptions{Weight: 5.0, Sortable: true})).
+		AddField(NewNumericField("date"))
 
 	// Drop an existing index. If the index does not exist an error is returned
-	c.Drop()
+	c.Drop(defaultCtx)
 
 	// Create the index with the given schema
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(context.Background(), sc); err != nil {
 		log.Fatal(err)
 	}
 
 	// Create a document with an id and given score
-	doc := redisearch.NewDocument("ExampleNewClient:doc1", 1.0)
+	doc := NewDocument("ExampleNewClient:doc1", 1.0)
 	doc.Set("title", "Hello world").
 		Set("body", "foo bar").
 		Set("date", time.Now().Unix())
 
 	// Index the document. The API accepts multiple documents at a time
-	if err := c.Index([]redisearch.Document{doc}...); err != nil {
+	if err := c.Index(defaultCtx, []Document{doc}...); err != nil {
 		log.Fatal(err)
 	}
 
 	// Wait for all documents to be indexed
-	info, _ := c.Info()
+	info, _ := c.Info(defaultCtx)
 	for info.IsIndexing {
 		time.Sleep(time.Second)
-		info, _ = c.Info()
+		info, _ = c.Info(defaultCtx)
 	}
 
 	// Searching with limit and sorting
-	docs, total, err := c.Search(redisearch.NewQuery("hello world").
+	docs, total, err := c.Search(defaultCtx, NewQuery("hello world").
 		Limit(0, 2).
 		SetReturnFields("title"))
 
@@ -60,7 +60,7 @@ func ExampleNewClient() {
 	// Output: ExampleNewClient:doc1 Hello world 1 <nil>
 
 	// Drop the existing index
-	c.Drop()
+	c.Drop(defaultCtx)
 }
 
 // RediSearch 2.0, marks the re-architecture of the way indices are kept in sync with the data.
@@ -73,21 +73,21 @@ func ExampleClient_CreateIndexWithIndexDefinition() {
 	pool := &redis.Pool{Dial: func() (redis.Conn, error) {
 		return redis.Dial("tcp", host, redis.DialPassword(password))
 	}}
-	c := redisearch.NewClientFromPool(pool, "products-from-hashes")
+	c := NewClientFromPool(pool, "products-from-hashes")
 
 	// Create a schema
-	schema := redisearch.NewSchema(redisearch.DefaultOptions).
-		AddField(redisearch.NewTextFieldOptions("name", redisearch.TextFieldOptions{Sortable: true})).
-		AddField(redisearch.NewTextFieldOptions("description", redisearch.TextFieldOptions{Weight: 5.0, Sortable: true})).
-		AddField(redisearch.NewNumericField("price"))
+	schema := NewSchema(DefaultOptions).
+		AddField(NewTextFieldOptions("name", TextFieldOptions{Sortable: true})).
+		AddField(NewTextFieldOptions("description", TextFieldOptions{Weight: 5.0, Sortable: true})).
+		AddField(NewNumericField("price"))
 
 	// IndexDefinition is available for RediSearch 2.0+
 	// Create a index definition for automatic indexing on Hash updates.
 	// In this example we will only index keys started by product:
-	indexDefinition := redisearch.NewIndexDefinition().AddPrefix("product:")
+	indexDefinition := NewIndexDefinition().AddPrefix("product:")
 
 	// Add the Index Definition
-	c.CreateIndexWithIndexDefinition(schema, indexDefinition)
+	c.CreateIndexWithIndexDefinition(defaultCtx, schema, indexDefinition)
 
 	// Get a vanilla connection and create 100 hashes
 	vanillaConnection := pool.Get()
@@ -96,13 +96,13 @@ func ExampleClient_CreateIndexWithIndexDefinition() {
 	}
 
 	// Wait for all documents to be indexed
-	info, _ := c.Info()
+	info, _ := c.Info(defaultCtx)
 	for info.IsIndexing {
 		time.Sleep(time.Second)
-		info, _ = c.Info()
+		info, _ = c.Info(defaultCtx)
 	}
 
-	_, total, _ := c.Search(redisearch.NewQuery("description"))
+	_, total, _ := c.Search(defaultCtx, NewQuery("description"))
 
 	fmt.Printf("Total documents containing \"description\": %d.\n", total)
 }
@@ -118,21 +118,21 @@ func ExampleClient_DropIndex() {
 	pool := &redis.Pool{Dial: func() (redis.Conn, error) {
 		return redis.Dial("tcp", host, redis.DialPassword(password))
 	}}
-	c := redisearch.NewClientFromPool(pool, "products-from-hashes")
+	c := NewClientFromPool(pool, "products-from-hashes")
 
 	// Create a schema
-	schema := redisearch.NewSchema(redisearch.DefaultOptions).
-		AddField(redisearch.NewTextFieldOptions("name", redisearch.TextFieldOptions{Sortable: true})).
-		AddField(redisearch.NewTextFieldOptions("description", redisearch.TextFieldOptions{Weight: 5.0, Sortable: true})).
-		AddField(redisearch.NewNumericField("price"))
+	schema := NewSchema(DefaultOptions).
+		AddField(NewTextFieldOptions("name", TextFieldOptions{Sortable: true})).
+		AddField(NewTextFieldOptions("description", TextFieldOptions{Weight: 5.0, Sortable: true})).
+		AddField(NewNumericField("price"))
 
 	// IndexDefinition is available for RediSearch 2.0+
 	// Create a index definition for automatic indexing on Hash updates.
 	// In this example we will only index keys started by product:
-	indexDefinition := redisearch.NewIndexDefinition().AddPrefix("product:")
+	indexDefinition := NewIndexDefinition().AddPrefix("product:")
 
 	// Add the Index Definition
-	c.CreateIndexWithIndexDefinition(schema, indexDefinition)
+	c.CreateIndexWithIndexDefinition(context.Background(), schema, indexDefinition)
 
 	// Get a vanilla connection and create 100 hashes
 	vanillaConnection := pool.Get()
@@ -141,14 +141,14 @@ func ExampleClient_DropIndex() {
 	}
 
 	// Wait for all documents to be indexed
-	info, _ := c.Info()
+	info, _ := c.Info(defaultCtx)
 	for info.IsIndexing {
 		time.Sleep(time.Second)
-		info, _ = c.Info()
+		info, _ = c.Info(defaultCtx)
 	}
 
 	// Delete Index and Documents
-	err := c.DropIndex(true)
+	err := c.DropIndex(defaultCtx, true)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -162,35 +162,35 @@ func ExampleNewClientFromPool() {
 	pool := &redis.Pool{Dial: func() (redis.Conn, error) {
 		return redis.Dial("tcp", host, redis.DialPassword(password))
 	}}
-	c := redisearch.NewClientFromPool(pool, "search-client-1")
+	c := NewClientFromPool(pool, "search-client-1")
 
 	// Create a schema
-	sc := redisearch.NewSchema(redisearch.DefaultOptions).
-		AddField(redisearch.NewTextField("body")).
-		AddField(redisearch.NewTextFieldOptions("title", redisearch.TextFieldOptions{Weight: 5.0, Sortable: true})).
-		AddField(redisearch.NewNumericField("date"))
+	sc := NewSchema(DefaultOptions).
+		AddField(NewTextField("body")).
+		AddField(NewTextFieldOptions("title", TextFieldOptions{Weight: 5.0, Sortable: true})).
+		AddField(NewNumericField("date"))
 
 	// Drop an existing index. If the index does not exist an error is returned
-	c.Drop()
+	c.Drop(defaultCtx)
 
 	// Create the index with the given schema
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(context.Background(), sc); err != nil {
 		log.Fatal(err)
 	}
 
 	// Create a document with an id and given score
-	doc := redisearch.NewDocument("ExampleNewClientFromPool:doc2", 1.0)
+	doc := NewDocument("ExampleNewClientFromPool:doc2", 1.0)
 	doc.Set("title", "Hello world").
 		Set("body", "foo bar").
 		Set("date", time.Now().Unix())
 
 	// Index the document. The API accepts multiple documents at a time
-	if err := c.Index([]redisearch.Document{doc}...); err != nil {
+	if err := c.Index(defaultCtx, []Document{doc}...); err != nil {
 		log.Fatal(err)
 	}
 
 	// Searching with limit and sorting
-	docs, total, err := c.Search(redisearch.NewQuery("hello world").
+	docs, total, err := c.Search(defaultCtx, NewQuery("hello world").
 		Limit(0, 2).
 		SetReturnFields("title"))
 
@@ -198,10 +198,10 @@ func ExampleNewClientFromPool() {
 	// Output: ExampleNewClientFromPool:doc2 Hello world 1 <nil>
 
 	// Drop the existing index
-	c.Drop()
+	c.Drop(defaultCtx)
 }
 
-//Example of how to establish an SSL connection from your app to the RedisAI Server
+// Example of how to establish an SSL connection from your app to the RedisAI Server
 func ExampleNewClientFromPool_ssl() {
 	// Consider the following helper methods that provide us with the connection details (host and password)
 	// and the paths for:
@@ -252,42 +252,42 @@ func ExampleNewClientFromPool_ssl() {
 		)
 	}}
 
-	c := redisearch.NewClientFromPool(pool, "search-client-1")
+	c := NewClientFromPool(pool, "search-client-1")
 
 	// Create a schema
-	sc := redisearch.NewSchema(redisearch.DefaultOptions).
-		AddField(redisearch.NewTextField("body")).
-		AddField(redisearch.NewTextFieldOptions("title", redisearch.TextFieldOptions{Weight: 5.0, Sortable: true})).
-		AddField(redisearch.NewNumericField("date"))
+	sc := NewSchema(DefaultOptions).
+		AddField(NewTextField("body")).
+		AddField(NewTextFieldOptions("title", TextFieldOptions{Weight: 5.0, Sortable: true})).
+		AddField(NewNumericField("date"))
 
 	// Drop an existing index. If the index does not exist an error is returned
-	c.Drop()
+	c.Drop(defaultCtx)
 
 	// Create the index with the given schema
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(context.Background(), sc); err != nil {
 		log.Fatal(err)
 	}
 
 	// Create a document with an id and given score
-	doc := redisearch.NewDocument("ExampleNewClientFromPool_ssl:doc3", 1.0)
+	doc := NewDocument("ExampleNewClientFromPool_ssl:doc3", 1.0)
 	doc.Set("title", "Hello world").
 		Set("body", "foo bar").
 		Set("date", time.Now().Unix())
 
 	// Index the document. The API accepts multiple documents at a time
-	if err := c.Index([]redisearch.Document{doc}...); err != nil {
+	if err := c.Index(defaultCtx, []Document{doc}...); err != nil {
 		log.Fatal(err)
 	}
 
 	// Searching with limit and sorting
-	docs, total, err := c.Search(redisearch.NewQuery("hello world").
+	docs, total, err := c.Search(defaultCtx, NewQuery("hello world").
 		Limit(0, 2).
 		SetReturnFields("title"))
 
 	fmt.Println(docs[0].Id, docs[0].Properties["title"], total, err)
 
 	// Drop the existing index
-	c.Drop()
+	c.Drop(defaultCtx)
 }
 
 // The following example illustrates geospatial search using RediSearch.
@@ -299,18 +299,18 @@ func ExampleNewClientFromPool_ssl() {
 func ExampleClient_Search() {
 	// Create a client. By default a client is schemaless
 	// unless a schema is provided when creating the index
-	c := redisearch.NewClient("localhost:6379", "cityIndex")
+	c := NewClient("localhost:6379", "cityIndex")
 
 	// Create a schema
-	sc := redisearch.NewSchema(redisearch.DefaultOptions).
-		AddField(redisearch.NewTextField("city")).
-		AddField(redisearch.NewGeoField("location"))
+	sc := NewSchema(DefaultOptions).
+		AddField(NewTextField("city")).
+		AddField(NewGeoField("location"))
 
 	// Drop an existing index. If the index does not exist an error is returned
-	c.Drop()
+	c.Drop(defaultCtx)
 
 	// Create the index with the given schema
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(context.Background(), sc); err != nil {
 		log.Fatal(err)
 	}
 
@@ -318,28 +318,28 @@ func ExampleClient_Search() {
 	// Note While Specifying location you should specify in following order -> longitude,latitude
 	// Same look and feel as GEOADD https://redis.io/commands/geoadd
 	// This example maps to https://redis.io/commands/geoadd#examples
-	docPalermo := redisearch.NewDocument("doc:Palermo", 1.0)
+	docPalermo := NewDocument("doc:Palermo", 1.0)
 	docPalermo.Set("name", "Palermo").
 		Set("location", "13.361389,38.115556")
 
-	docCatania := redisearch.NewDocument("doc:Catania", 1.0)
+	docCatania := NewDocument("doc:Catania", 1.0)
 	docCatania.Set("name", "Catania").
 		Set("location", "15.087269,37.502669")
 
 	// Index the documents. The API accepts multiple documents at a time
-	if err := c.IndexOptions(redisearch.DefaultIndexingOptions, docPalermo, docCatania); err != nil {
+	if err := c.IndexOptions(defaultCtx, DefaultIndexingOptions, docPalermo, docCatania); err != nil {
 		log.Fatal(err)
 	}
 
 	// Searching for 100KM radius should only output Catania
-	docs, _, _ := c.Search(redisearch.NewQuery("*").AddFilter(
-		redisearch.Filter{
+	docs, _, _ := c.Search(defaultCtx, NewQuery("*").AddFilter(
+		Filter{
 			Field: "location",
-			Options: redisearch.GeoFilterOptions{
+			Options: GeoFilterOptions{
 				Lon:    15,
 				Lat:    37,
 				Radius: 100,
-				Unit:   redisearch.KILOMETERS,
+				Unit:   KILOMETERS,
 			},
 		},
 	).Limit(0, 2))
@@ -348,14 +348,14 @@ func ExampleClient_Search() {
 	fmt.Println(docs[0])
 
 	// Searching for 200KM radius should output Catania and Palermo
-	docs, _, _ = c.Search(redisearch.NewQuery("*").AddFilter(
-		redisearch.Filter{
+	docs, _, _ = c.Search(defaultCtx, NewQuery("*").AddFilter(
+		Filter{
 			Field: "location",
-			Options: redisearch.GeoFilterOptions{
+			Options: GeoFilterOptions{
 				Lon:    15,
 				Lat:    37,
 				Radius: 200,
-				Unit:   redisearch.KILOMETERS,
+				Unit:   KILOMETERS,
 			},
 		},
 	).Limit(0, 2).SetSortBy("location", true))

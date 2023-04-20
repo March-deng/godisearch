@@ -1,6 +1,7 @@
 package redisearch
 
 import (
+	"context"
 	"fmt"
 	"math"
 
@@ -414,9 +415,13 @@ func (q *Query) SetDialect(dialect int) *Query {
 }
 
 // IndexOptions indexes multiple documents on the index, with optional Options passed to options
-func (i *Client) IndexOptions(opts IndexingOptions, docs ...Document) error {
+func (i *Client) IndexOptions(ctx context.Context, opts IndexingOptions, docs ...Document) error {
 
-	conn := i.pool.Get()
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
+
 	defer conn.Close()
 
 	n := 0

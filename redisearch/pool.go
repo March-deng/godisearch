@@ -1,15 +1,17 @@
 package redisearch
 
 import (
+	"context"
 	"fmt"
-	"github.com/gomodule/redigo/redis"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/gomodule/redigo/redis"
 )
 
 type ConnPool interface {
-	Get() redis.Conn
+	Get(context.Context) (redis.Conn, error)
 	Close() error
 }
 
@@ -21,6 +23,7 @@ func NewSingleHostPool(host string) *SingleHostPool {
 	pool := &redis.Pool{Dial: func() (redis.Conn, error) {
 		return redis.Dial("tcp", host)
 	}, MaxIdle: maxConns}
+
 	pool.TestOnBorrow = func(c redis.Conn, t time.Time) (err error) {
 		if time.Since(t) > time.Second {
 			_, err = c.Do("PING")
@@ -30,17 +33,23 @@ func NewSingleHostPool(host string) *SingleHostPool {
 	return &SingleHostPool{pool}
 }
 
-type MultiHostPool struct {
-	sync.Mutex
-	pools map[string]*redis.Pool
-	hosts []string
+func (s *SingleHostPool) Get(ctx context.Context) (redis.Conn, error) {
+	return s.Pool.GetContext(ctx)
 }
 
-func NewMultiHostPool(hosts []string) *MultiHostPool {
+type MultiHostPool struct {
+	sync.Mutex
+	pools    map[string]*redis.Pool
+	hosts    []string
+	dialOpts []redis.DialOption
+}
+
+func NewMultiHostPool(hosts []string, opts ...redis.DialOption) *MultiHostPool {
 
 	return &MultiHostPool{
-		pools: make(map[string]*redis.Pool, len(hosts)),
-		hosts: hosts,
+		pools:    make(map[string]*redis.Pool, len(hosts)),
+		hosts:    hosts,
+		dialOpts: opts,
 	}
 }
 
@@ -52,7 +61,7 @@ func (p *MultiHostPool) Get() redis.Conn {
 	if !found {
 		pool = redis.NewPool(func() (redis.Conn, error) {
 			// TODO: Add timeouts. and 2 separate pools for indexing and querying, with different timeouts
-			return redis.Dial("tcp", host)
+			return redis.Dial("tcp", host, p.dialOpts...)
 		}, maxConns)
 		pool.TestOnBorrow = func(c redis.Conn, t time.Time) (err error) {
 			if time.Since(t) > time.Second {

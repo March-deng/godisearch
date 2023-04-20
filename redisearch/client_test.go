@@ -1,6 +1,7 @@
 package redisearch
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -10,8 +11,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var (
+	defaultCtx = context.Background()
+)
+
 func flush(c *Client) (err error) {
-	conn := c.pool.Get()
+	conn, err := c.pool.Get(defaultCtx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 	return conn.Send("FLUSHALL")
 }
@@ -23,8 +31,10 @@ func teardown(c *Client) {
 // getRediSearchVersion returns RediSearch version by issuing "MODULE LIST" command
 // and iterating through the availabe modules up until "ft" is found as the name property
 func (c *Client) getRediSearchVersion() (version int64, err error) {
-	conn := c.pool.Get()
-	defer conn.Close()
+	conn, err := c.pool.Get(defaultCtx)
+	if err != nil {
+		return 0, err
+	}
 	var values []interface{}
 	var moduleInfo []interface{}
 	var moduleName string
@@ -51,12 +61,12 @@ func (c *Client) getRediSearchVersion() (version int64, err error) {
 func TestClient_Get(t *testing.T) {
 
 	c := createClient("test-get")
-	c.Drop()
+	c.Drop(defaultCtx)
 
 	sc := NewSchema(DefaultOptions).
 		AddField(NewTextField("foo"))
 
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(defaultCtx, sc); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,7 +78,7 @@ func TestClient_Get(t *testing.T) {
 		docs[i] = NewDocument(docIds[i], 1).Set("foo", "Hello world")
 		docPointers[i] = &docs[i]
 	}
-	err := c.Index(docs...)
+	err := c.Index(defaultCtx, docs...)
 	assert.Nil(t, err)
 
 	type fields struct {
@@ -95,7 +105,7 @@ func TestClient_Get(t *testing.T) {
 				pool: tt.fields.pool,
 				name: tt.fields.name,
 			}
-			gotDoc, err := i.Get(tt.args.docId)
+			gotDoc, err := i.Get(defaultCtx, tt.args.docId)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Get() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -113,12 +123,12 @@ func TestClient_Get(t *testing.T) {
 
 func TestClient_MultiGet(t *testing.T) {
 	c := createClient("test-get")
-	c.Drop()
+	c.Drop(defaultCtx)
 
 	sc := NewSchema(DefaultOptions).
 		AddField(NewTextField("foo"))
 
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(defaultCtx, sc); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,7 +140,7 @@ func TestClient_MultiGet(t *testing.T) {
 		docs[i] = NewDocument(docIds[i], 1).Set("foo", "Hello world")
 		docPointers[i] = &docs[i]
 	}
-	err := c.Index(docs...)
+	err := c.Index(defaultCtx, docs...)
 	assert.Nil(t, err)
 
 	type fields struct {
@@ -160,7 +170,7 @@ func TestClient_MultiGet(t *testing.T) {
 				pool: tt.fields.pool,
 				name: tt.fields.name,
 			}
-			gotDocs, err := i.MultiGet(tt.args.documentIds)
+			gotDocs, err := i.MultiGet(defaultCtx, tt.args.documentIds)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("MultiGet() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -204,7 +214,7 @@ func TestClient_DictAdd(t *testing.T) {
 				pool: tt.fields.pool,
 				name: tt.fields.name,
 			}
-			gotNewTerms, err := i.DictAdd(tt.args.dictionaryName, tt.args.terms)
+			gotNewTerms, err := i.DictAdd(defaultCtx, tt.args.dictionaryName, tt.args.terms)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DictAdd() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -212,7 +222,7 @@ func TestClient_DictAdd(t *testing.T) {
 			if gotNewTerms != tt.wantNewTerms {
 				t.Errorf("DictAdd() gotNewTerms = %v, want %v", gotNewTerms, tt.wantNewTerms)
 			}
-			i.DictDel(tt.args.dictionaryName, tt.args.terms)
+			i.DictDel(defaultCtx, tt.args.dictionaryName, tt.args.terms)
 		})
 	}
 	teardown(c)
@@ -229,7 +239,7 @@ func TestClient_DictDel(t *testing.T) {
 		terms[i] = fmt.Sprintf("term%d", i)
 	}
 
-	c.DictAdd("dict1", terms)
+	c.DictAdd(defaultCtx, "dict1", terms)
 
 	type fields struct {
 		pool ConnPool
@@ -256,7 +266,7 @@ func TestClient_DictDel(t *testing.T) {
 				pool: tt.fields.pool,
 				name: tt.fields.name,
 			}
-			gotDeletedTerms, err := i.DictDel(tt.args.dictionaryName, tt.args.terms)
+			gotDeletedTerms, err := i.DictDel(defaultCtx, tt.args.dictionaryName, tt.args.terms)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DictDel() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -278,7 +288,7 @@ func TestClient_DictDump(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		terms1[i] = fmt.Sprintf("term%d", i)
 	}
-	c.DictAdd("dictdump-dict1", terms1)
+	c.DictAdd(defaultCtx, "dictdump-dict1", terms1)
 
 	type fields struct {
 		pool ConnPool
@@ -303,7 +313,7 @@ func TestClient_DictDump(t *testing.T) {
 				pool: tt.fields.pool,
 				name: tt.fields.name,
 			}
-			gotTerms, err := i.DictDump(tt.args.dictionaryName)
+			gotTerms, err := i.DictDump(defaultCtx, tt.args.dictionaryName)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DictDump() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -323,14 +333,14 @@ func TestClient_AliasAdd(t *testing.T) {
 	sc := NewSchema(DefaultOptions).
 		AddField(NewTextField("foo")).
 		AddField(NewTextField("bar"))
-	c.Drop()
-	assert.Nil(t, c.CreateIndex(sc))
+	c.Drop(defaultCtx)
+	assert.Nil(t, c.CreateIndex(context.Background(), sc))
 
 	docs := make([]Document, 100)
 	for i := 0; i < 100; i++ {
 		docs[i] = NewDocument(fmt.Sprintf("doc--alias-add-%d", i), 1).Set("foo", "hello world").Set("bar", "hello world foo bar baz")
 	}
-	err := c.Index(docs...)
+	err := c.Index(defaultCtx, docs...)
 
 	assert.Nil(t, err)
 
@@ -356,7 +366,7 @@ func TestClient_AliasAdd(t *testing.T) {
 				pool: tt.fields.pool,
 				name: tt.fields.name,
 			}
-			if err := i.AliasAdd(tt.args.name); (err != nil) != tt.wantErr {
+			if err := i.AliasAdd(defaultCtx, tt.args.name); (err != nil) != tt.wantErr {
 				t.Errorf("AliasAdd() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -371,18 +381,18 @@ func TestClient_AliasDel(t *testing.T) {
 	sc := NewSchema(DefaultOptions).
 		AddField(NewTextField("foo")).
 		AddField(NewTextField("bar"))
-	c.Drop()
-	err := c.CreateIndex(sc)
+	c.Drop(defaultCtx)
+	err := c.CreateIndex(context.Background(), sc)
 	assert.Nil(t, err)
 
 	docs := make([]Document, 100)
 	for i := 0; i < 100; i++ {
 		docs[i] = NewDocument(fmt.Sprintf("doc-alias-del-%d", i), 1).Set("foo", "hello world").Set("bar", "hello world foo bar baz")
 	}
-	err = c.Index(docs...)
+	err = c.Index(defaultCtx, docs...)
 
 	assert.Nil(t, err)
-	err = c.AliasAdd("aliasdel1")
+	err = c.AliasAdd(defaultCtx, "aliasdel1")
 	assert.Nil(t, err)
 
 	type fields struct {
@@ -407,7 +417,7 @@ func TestClient_AliasDel(t *testing.T) {
 				pool: tt.fields.pool,
 				name: tt.fields.name,
 			}
-			if err := i.AliasDel(tt.args.name); (err != nil) != tt.wantErr {
+			if err := i.AliasDel(defaultCtx, tt.args.name); (err != nil) != tt.wantErr {
 				t.Errorf("AliasDel() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -421,18 +431,18 @@ func TestClient_AliasUpdate(t *testing.T) {
 	sc := NewSchema(DefaultOptions).
 		AddField(NewTextField("foo")).
 		AddField(NewTextField("bar"))
-	c.Drop()
-	err := c.CreateIndex(sc)
+	c.Drop(defaultCtx)
+	err := c.CreateIndex(context.Background(), sc)
 	assert.Nil(t, err)
 
 	docs := make([]Document, 100)
 	for i := 0; i < 100; i++ {
 		docs[i] = NewDocument(fmt.Sprintf("doc-alias-update-%d", i), 1).Set("foo", "hello world").Set("bar", "hello world foo bar baz")
 	}
-	err = c.Index(docs...)
+	err = c.Index(defaultCtx, docs...)
 
 	assert.Nil(t, err)
-	err = c.AliasAdd("aliasupdate")
+	err = c.AliasAdd(defaultCtx, "aliasupdate")
 	assert.Nil(t, err)
 	type fields struct {
 		pool ConnPool
@@ -455,7 +465,7 @@ func TestClient_AliasUpdate(t *testing.T) {
 				pool: tt.fields.pool,
 				name: tt.fields.name,
 			}
-			if err := i.AliasUpdate(tt.args.name); (err != nil) != tt.wantErr {
+			if err := i.AliasUpdate(defaultCtx, tt.args.name); (err != nil) != tt.wantErr {
 				t.Errorf("AliasUpdate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -465,16 +475,16 @@ func TestClient_AliasUpdate(t *testing.T) {
 
 func TestClient_Config(t *testing.T) {
 	c := createClient("testconfigindex")
-	c.Drop()
-	ret, err := c.SetConfig("TIMEOUT", "100")
+	c.Drop(defaultCtx)
+	ret, err := c.SetConfig(defaultCtx, "TIMEOUT", "100")
 	assert.Nil(t, err)
 	assert.Equal(t, "OK", ret)
 
 	var kvs map[string]string
-	kvs, _ = c.GetConfig("TIMEOUT")
+	kvs, _ = c.GetConfig(defaultCtx, "TIMEOUT")
 	assert.Equal(t, "100", kvs["TIMEOUT"])
 
-	kvs, _ = c.GetConfig("*")
+	kvs, _ = c.GetConfig(defaultCtx, "*")
 	assert.Equal(t, "100", kvs["TIMEOUT"])
 	teardown(c)
 }
@@ -502,20 +512,20 @@ func TestClient_GetTagVals(t *testing.T) {
 		AddField(NewTextField("name")).
 		AddField(NewTagField("tags"))
 
-	c.Drop()
-	c.CreateIndex(sc)
+	c.Drop(defaultCtx)
+	c.CreateIndex(context.Background(), sc)
 
 	docs := make([]Document, 1)
 	doc := NewDocument("doc1", 1.0)
 	doc.Set("name", "John").
 		Set("tags", "single, young")
 	docs[0] = doc
-	c.Index(docs...)
-	tags, err := c.GetTagVals("testgettagvals", "tags")
+	c.Index(defaultCtx, docs...)
+	tags, err := c.GetTagVals(defaultCtx, "testgettagvals", "tags")
 	assert.Nil(t, err)
 	assert.Contains(t, tags, "single")
 	// negative tests
-	tags, err = c.GetTagVals("notexit", "tags")
+	tags, err = c.GetTagVals(defaultCtx, "notexit", "tags")
 	assert.NotNil(t, err)
 	assert.Nil(t, tags)
 	teardown(c)
@@ -529,14 +539,14 @@ func TestClient_SynAdd(t *testing.T) {
 		sc := NewSchema(DefaultOptions).
 			AddField(NewTextField("name")).
 			AddField(NewTextField("addr"))
-		c.Drop()
-		err := c.CreateIndex(sc)
+		c.Drop(defaultCtx)
+		err := c.CreateIndex(context.Background(), sc)
 		assert.Nil(t, err)
 
-		gid, err := c.SynAdd("testsynadd", []string{"girl", "baby"})
+		gid, err := c.SynAdd(defaultCtx, "testsynadd", []string{"girl", "baby"})
 		assert.Nil(t, err)
 		assert.True(t, gid >= 0)
-		ret, err := c.SynUpdate("testsynadd", gid, []string{"girl", "baby"})
+		ret, err := c.SynUpdate(defaultCtx, "testsynadd", gid, []string{"girl", "baby"})
 		assert.Nil(t, err)
 		assert.Equal(t, "OK", ret)
 	}
@@ -550,28 +560,28 @@ func TestClient_SynDump(t *testing.T) {
 	sc := NewSchema(DefaultOptions).
 		AddField(NewTextField("name")).
 		AddField(NewTextField("addr"))
-	c.Drop()
-	err = c.CreateIndex(sc)
+	c.Drop(defaultCtx)
+	err = c.CreateIndex(defaultCtx, sc)
 	var gId1 int64 = 1
 	var gId2 int64 = 2
 
 	assert.Nil(t, err)
 	// For RediSearch < v2.0 we need to use SYNADD. For Redisearch >= v2.0 we need to use SYNUPDATE
 	if version <= 10699 {
-		_, err = c.SynAdd("testsyndump", []string{"girl", "baby"})
+		_, err = c.SynAdd(defaultCtx, "testsyndump", []string{"girl", "baby"})
 		assert.Nil(t, err)
-		_, err = c.SynAdd("testsyndump", []string{"child"})
+		_, err = c.SynAdd(defaultCtx, "testsyndump", []string{"child"})
 		assert.Nil(t, err)
 	} else {
-		ret, err := c.SynUpdate("testsyndump", gId1, []string{"girl", "baby"})
+		ret, err := c.SynUpdate(defaultCtx, "testsyndump", gId1, []string{"girl", "baby"})
 		assert.Nil(t, err)
 		assert.Equal(t, "OK", ret)
-		_, err = c.SynUpdate("testsyndump", gId2, []string{"child"})
+		_, err = c.SynUpdate(defaultCtx, "testsyndump", gId2, []string{"child"})
 		assert.Nil(t, err)
 		assert.Equal(t, "OK", ret)
 	}
 
-	m, _ := c.SynDump("testsyndump")
+	m, _ := c.SynDump(defaultCtx, "testsyndump")
 	assert.Contains(t, m, "baby")
 	assert.Contains(t, m, "girl")
 	assert.Contains(t, m, "child")
@@ -584,14 +594,17 @@ func TestClient_AddHash(t *testing.T) {
 	sc := NewSchema(DefaultOptions).
 		AddField(NewTextField("name")).
 		AddField(NewTextField("addr"))
-	c.Drop()
-	err := c.CreateIndex(sc)
+	c.Drop(defaultCtx)
+	err := c.CreateIndex(context.Background(), sc)
 	assert.Nil(t, err)
 
 	// Add a hash key
-	c.pool.Get().Do("HMSET", "myhash", "field1", "Hello")
+	// c.pool.Get().Do("HMSET", "myhash", "field1", "Hello")
+	conn, err := c.pool.Get(defaultCtx)
+	assert.Nil(t, err)
+	conn.Do("HMSET", "myhash", "field1", "Hello")
 
-	ret, err := c.AddHash("myhash", 1, "english", true)
+	ret, err := c.AddHash(defaultCtx, "myhash", 1, "english", true)
 	// Given that FT.ADDHASH is no longer valid for search2+ we assert it's error
 	if err != nil {
 		assert.Equal(t, "ERR unknown command `FT.ADDHASH`, with args beginning with: `testAddHash`, `myhash`, `1`, `LANGUAGE`, `english`, `REPLACE`, ", err.Error())
@@ -606,12 +619,12 @@ func TestClient_AddField(t *testing.T) {
 	sc := NewSchema(DefaultOptions).
 		AddField(NewTextField("name")).
 		AddField(NewTextField("addr"))
-	c.Drop()
-	err := c.CreateIndex(sc)
+	c.Drop(defaultCtx)
+	err := c.CreateIndex(context.Background(), sc)
 	assert.Nil(t, err)
-	err = c.AddField(NewNumericField("age"))
+	err = c.AddField(defaultCtx, NewNumericField("age"))
 	assert.Nil(t, err)
-	err = c.Index(NewDocument("doc-n1", 1.0).Set("age", 15))
+	err = c.Index(defaultCtx, NewDocument("doc-n1", 1.0).Set("age", 15))
 	assert.Nil(t, err)
 	teardown(c)
 }
@@ -649,8 +662,8 @@ func TestClient_CreateIndexWithIndexDefinitionJSON(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c.Drop()
-			if err := c.CreateIndexWithIndexDefinition(tt.args.schema, tt.args.definition); (err != nil) != tt.wantErr {
+			c.Drop(defaultCtx)
+			if err := c.CreateIndexWithIndexDefinition(context.Background(), tt.args.schema, tt.args.definition); (err != nil) != tt.wantErr {
 				t.Errorf("CreateIndexWithIndexDefinition() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -705,7 +718,7 @@ func TestClient_CreateIndexWithIndexDefinition(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				if err := i.CreateIndexWithIndexDefinition(tt.args.schema, tt.args.definition); (err != nil) != tt.wantErr {
+				if err := i.CreateIndexWithIndexDefinition(context.Background(), tt.args.schema, tt.args.definition); (err != nil) != tt.wantErr {
 					t.Errorf("CreateIndexWithIndexDefinition() error = %v, wantErr %v", err, tt.wantErr)
 				}
 				teardown(i)
@@ -739,18 +752,18 @@ func TestClient_SynUpdate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c.Drop()
-			err := c.CreateIndex(sc)
+			c.Drop(defaultCtx)
+			err := c.CreateIndex(context.Background(), sc)
 			assert.Nil(t, err)
 			gId := tt.args.synonymGroupId
 
 			// For older version of RediSearch we first need to use SYNADD then SYNUPDATE
 			if version <= 10699 {
-				gId, err = c.SynAdd(tt.args.indexName, []string{"workaround"})
+				gId, err = c.SynAdd(defaultCtx, tt.args.indexName, []string{"workaround"})
 				assert.Nil(t, err)
 			}
 
-			got, err := c.SynUpdate(tt.args.indexName, gId, tt.args.terms)
+			got, err := c.SynUpdate(defaultCtx, tt.args.indexName, gId, tt.args.terms)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SynUpdate() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -786,15 +799,17 @@ func TestClient_Delete(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c.Drop()
-			err := c.CreateIndex(sc)
+			c.Drop(defaultCtx)
+			err := c.CreateIndex(context.Background(), sc)
 			assert.Nil(t, err)
-			err = c.Index(NewDocument(tt.args.docId, 1.0).Set("name", "Jon Doe"))
+			err = c.Index(defaultCtx, NewDocument(tt.args.docId, 1.0).Set("name", "Jon Doe"))
 			assert.Nil(t, err)
-			if err := c.Delete(tt.args.docId, tt.args.deleteDocument); (err != nil) != tt.wantErr {
+			if err := c.Delete(defaultCtx, tt.args.docId, tt.args.deleteDocument); (err != nil) != tt.wantErr {
 				t.Errorf("Delete() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			docExists, err := redis.Bool(c.pool.Get().Do("EXISTS", tt.args.docId))
+			conn, err := c.pool.Get(defaultCtx)
+			assert.Nil(t, err)
+			docExists, err := redis.Bool(conn.Do("EXISTS", tt.args.docId))
 			assert.Nil(t, err)
 			if version <= 10699 {
 				assert.Equal(t, tt.documentShouldExist, docExists)
@@ -826,17 +841,19 @@ func TestClient_DeleteDocument(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c.Drop()
-			err := c.CreateIndex(sc)
+			c.Drop(defaultCtx)
+			err := c.CreateIndex(context.Background(), sc)
 			assert.Nil(t, err)
 			for _, docId := range tt.args.docIdsToAddIdx {
-				err = c.Index(NewDocument(docId, 1.0).Set("name", "Jon Doe"))
+				err = c.Index(defaultCtx, NewDocument(docId, 1.0).Set("name", "Jon Doe"))
 				assert.Nil(t, err)
 			}
-			if err := c.DeleteDocument(tt.args.docId); (err != nil) != tt.wantErr {
+			if err := c.DeleteDocument(defaultCtx, tt.args.docId); (err != nil) != tt.wantErr {
 				t.Errorf("DeleteDocument() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			docExists, err := redis.Bool(c.pool.Get().Do("EXISTS", tt.args.docId))
+			conn, err := c.pool.Get(defaultCtx)
+			assert.Nil(t, err)
+			docExists, err := redis.Bool(conn.Do("EXISTS", tt.args.docId))
 			assert.Nil(t, err)
 			assert.False(t, docExists)
 			teardown(c)
@@ -879,8 +896,8 @@ func TestClient_CreateIndexWithIndexDefinition1(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c.Drop()
-			if err := c.CreateIndexWithIndexDefinition(tt.args.schema, tt.args.definition); (err != nil) != tt.wantErr {
+			c.Drop(defaultCtx)
+			if err := c.CreateIndexWithIndexDefinition(context.Background(), tt.args.schema, tt.args.definition); (err != nil) != tt.wantErr {
 				t.Errorf("CreateIndexWithIndexDefinition() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -923,29 +940,30 @@ func TestClient_CreateIndex(t *testing.T) {
 	indexDefinition := NewIndexDefinition().AddPrefix("create-index-info:")
 
 	// Add the Index Definition
-	c.CreateIndexWithIndexDefinition(schema, indexDefinition)
+	c.CreateIndexWithIndexDefinition(context.Background(), schema, indexDefinition)
 	assert.Nil(t, err)
 
 	// Create docs with a name that has the same phonetic matcher
-	vanillaConnection := c.pool.Get()
+	vanillaConnection, err := c.pool.Get(defaultCtx)
+	assert.Nil(t, err)
 	_, err = vanillaConnection.Do("HSET", "create-index-info:doc1", "name", "Jon", "age", 25, "tags", "tag1|tag2", "geo", "40.7222756,-73.9977894")
 	assert.Nil(t, err)
 	_, err = vanillaConnection.Do("HSET", "create-index-info:doc2", "name", "John", "age", 20, "tags", "tag1|tag2", "geo", "40.7222756,-73.9977894")
 	assert.Nil(t, err)
 
 	// Wait for all documents to be indexed
-	info, err := c.Info()
+	info, err := c.Info(defaultCtx)
 	assert.Nil(t, err)
 	for info.IsIndexing {
 		time.Sleep(time.Second)
-		info, _ = c.Info()
+		info, _ = c.Info(defaultCtx)
 	}
 
 	assert.Equal(t, uint64(2), info.DocCount)
 	assert.Equal(t, false, info.IsIndexing)
 	assert.Equal(t, uint64(0), info.HashIndexingFailures)
 
-	docs, total, err := c.Search(NewQuery("Jon").SetReturnFields("name"))
+	docs, total, err := c.Search(defaultCtx, NewQuery("Jon").SetReturnFields("name"))
 	assert.Nil(t, err)
 	// Verify that the we've received 2 documents ( Jon and John )
 	assert.Equal(t, 2, total)
@@ -990,28 +1008,29 @@ func TestClient_CreateJsonIndex(t *testing.T) {
 	indexDefinition := NewIndexDefinition().SetIndexOn(JSON).AddPrefix("create-json-index:")
 
 	// Add the Index Definition
-	err := c.CreateIndexWithIndexDefinition(schema, indexDefinition)
+	err := c.CreateIndexWithIndexDefinition(context.Background(), schema, indexDefinition)
 	assert.Nil(t, err)
 
 	// Create docs with a name that has the same phonetic matcher
-	vanillaConnection := c.pool.Get()
+	vanillaConnection, err := c.pool.Get(defaultCtx)
+	assert.Nil(t, err)
 	_, err = vanillaConnection.Do("JSON.SET", "create-json-index:doc1", "$", "{\"name\":\"Jon\", \"age\": 25}")
 	assert.Nil(t, err)
 	_, err = vanillaConnection.Do("JSON.SET", "create-json-index:doc2", "$", "{\"name\":\"John\", \"age\": 25}")
 	assert.Nil(t, err)
 
 	// Wait for all documents to be indexed
-	info, err := c.Info()
+	info, err := c.Info(defaultCtx)
 	assert.Nil(t, err)
 	for info.IsIndexing {
 		time.Sleep(time.Second)
-		info, _ = c.Info()
+		info, _ = c.Info(defaultCtx)
 	}
 
 	assert.Equal(t, uint64(2), info.DocCount)
 	assert.Equal(t, false, info.IsIndexing)
 	assert.Equal(t, uint64(0), info.HashIndexingFailures)
-	docs, total, err := c.Search(NewQuery("Jon").
+	docs, total, err := c.Search(defaultCtx, NewQuery("Jon").
 		SetReturnFields("name"))
 	assert.Nil(t, err)
 	// Verify that the we've received 2 documents ( Jon and John )
@@ -1029,7 +1048,7 @@ func TestClient_CreateIndex_failure(t *testing.T) {
 		// IndexDefinition is available for RediSearch 2.0+
 		return
 	}
-	c.DropIndex(true)
+	c.DropIndex(defaultCtx, true)
 
 	// Create a schema
 	schema := NewSchema(DefaultOptions).
@@ -1041,24 +1060,25 @@ func TestClient_CreateIndex_failure(t *testing.T) {
 	indexDefinition := NewIndexDefinition().AddPrefix("create-index-failure:")
 
 	// Add the Index Definition
-	c.CreateIndexWithIndexDefinition(schema, indexDefinition)
+	c.CreateIndexWithIndexDefinition(context.Background(), schema, indexDefinition)
 	assert.Nil(t, err)
 
 	// Create docs with a name that has the same phonetic matcher
-	vanillaConnection := c.pool.Get()
+	vanillaConnection, err := c.pool.Get(defaultCtx)
+	assert.Nil(t, err)
 	vanillaConnection.Do("HSET", "create-index-failure:doc1", "name", "Jon", "age", "abc")
 	vanillaConnection.Do("HSET", "create-index-failure:doc2", "name", "John", "age", 20)
 
 	// Wait for all documents to be indexed
-	info, _ := c.Info()
+	info, _ := c.Info(defaultCtx)
 	for info.IsIndexing {
 		time.Sleep(time.Second)
-		info, _ = c.Info()
+		info, _ = c.Info(defaultCtx)
 	}
 	assert.Equal(t, uint64(1), info.DocCount)
 	assert.Equal(t, false, info.IsIndexing)
 	assert.Equal(t, uint64(1), info.HashIndexingFailures)
-	docs, total, err := c.Search(NewQuery("Jon").
+	docs, total, err := c.Search(defaultCtx, NewQuery("Jon").
 		SetReturnFields("name"))
 	assert.Nil(t, err)
 	// Verify that the we've received 1 document ( John )
@@ -1066,7 +1086,7 @@ func TestClient_CreateIndex_failure(t *testing.T) {
 	assert.Equal(t, "John", docs[0].Properties["name"])
 
 	// Drop index but keep docs
-	err = c.DropIndex(true)
+	err = c.DropIndex(defaultCtx, true)
 	assert.Nil(t, err)
 }
 
@@ -1089,26 +1109,27 @@ func TestClient_DropIndex(t *testing.T) {
 	indexDefinition := NewIndexDefinition().AddPrefix("drop-index:")
 
 	// Add the Index Definition
-	err = c.CreateIndexWithIndexDefinition(schema, indexDefinition)
+	err = c.CreateIndexWithIndexDefinition(context.Background(), schema, indexDefinition)
 	assert.Nil(t, err)
 
 	// Create docs with a name that has the same phonetic matcher
-	vanillaConnection := c.pool.Get()
+	vanillaConnection, err := c.pool.Get(defaultCtx)
+	assert.Nil(t, err)
 	vanillaConnection.Do("HSET", "drop-index:doc1", "name", "Jon", "age", 25)
 	vanillaConnection.Do("HSET", "drop-index:doc2", "name", "John", "age", 20)
 
 	// Wait for all documents to be indexed
-	info, _ := c.Info()
+	info, _ := c.Info(defaultCtx)
 	for info.IsIndexing {
 		time.Sleep(time.Second)
-		info, _ = c.Info()
+		info, _ = c.Info(defaultCtx)
 	}
 
 	// Drop index but keep docs
-	err = c.DropIndex(false)
+	err = c.DropIndex(defaultCtx, false)
 	assert.Nil(t, err)
 	// Now that we don't have the index this should raise an error
-	_, err = c.Info()
+	_, err = c.Info(defaultCtx)
 	assert.EqualError(t, err, "Unknown Index name")
 	// Assert hashes still exist
 	result, _ := vanillaConnection.Do("EXISTS", "drop-index:doc1")
@@ -1117,21 +1138,21 @@ func TestClient_DropIndex(t *testing.T) {
 	assert.Equal(t, int64(1), result)
 
 	// Create index again
-	err = c.CreateIndexWithIndexDefinition(schema, indexDefinition)
+	err = c.CreateIndexWithIndexDefinition(context.Background(), schema, indexDefinition)
 
 	// Wait for all documents to be indexed again
-	info, _ = c.Info()
+	info, _ = c.Info(defaultCtx)
 	for info.IsIndexing {
 		time.Sleep(time.Second)
-		info, _ = c.Info()
+		info, _ = c.Info(defaultCtx)
 	}
 
 	assert.Nil(t, err)
 	// Drop index but keep docs
-	err = c.DropIndex(true)
+	err = c.DropIndex(defaultCtx, true)
 	assert.Nil(t, err)
 	// Now that we don't have the index this should raise an error
-	_, err = c.Info()
+	_, err = c.Info(defaultCtx)
 	assert.EqualError(t, err, "Unknown Index name")
 	// Assert hashes still exist
 	result, _ = vanillaConnection.Do("EXISTS", "drop-index:doc1")
@@ -1159,10 +1180,10 @@ func TestClient_ListIndex(t *testing.T) {
 	indexDefinition := NewIndexDefinition().AddPrefix("index-list-test:")
 
 	// Add the Index Definition
-	err = c.CreateIndexWithIndexDefinition(schema, indexDefinition)
+	err = c.CreateIndexWithIndexDefinition(context.Background(), schema, indexDefinition)
 	assert.Nil(t, err)
 
-	indexes, err := c.List()
+	indexes, err := c.List(defaultCtx)
 	assert.Nil(t, err)
 	assert.Equal(t, "index-list-test", indexes[0])
 }
@@ -1187,10 +1208,10 @@ func TestClient_InfoSchemaFields(t *testing.T) {
 		}}))
 
 	// Add the Index Definition
-	err = c.CreateIndexWithIndexDefinition(schema, NewIndexDefinition())
+	err = c.CreateIndexWithIndexDefinition(context.Background(), schema, NewIndexDefinition())
 	assert.Nil(t, err)
 
-	info, err := c.Info()
+	info, err := c.Info(defaultCtx)
 	assert.Nil(t, err)
 	assert.True(t, info.Schema.Options.NoFieldFlags)
 	assert.True(t, info.Schema.Options.NoFrequencies)
@@ -1232,10 +1253,10 @@ func TestClient_InfoFieldsTest(t *testing.T) {
 	// In this example we will only index keys started by product:
 	indexDefinition := NewIndexDefinition().AddPrefix("ft-info-fields-test:")
 	// Add the Index Definition
-	err := c.CreateIndexWithIndexDefinition(schema, indexDefinition)
+	err := c.CreateIndexWithIndexDefinition(context.Background(), schema, indexDefinition)
 	assert.Nil(t, err)
 
-	info, err := c.Info()
+	info, err := c.Info(defaultCtx)
 	assert.Nil(t, err)
 	// Check to make sure the fields that we get back match the fields that we created
 	assert.Equal(t,

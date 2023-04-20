@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -13,6 +14,7 @@ import (
  * Update at: https://github.com/RediSearch/RediSearch/blob/master/docs/go_client.md
  */
 func main() {
+	ctx := context.Background()
 	// Create a client. By default a client is schemaless
 	// unless a schema is provided when creating the index
 	c := redisearch.NewClient("localhost:6379", "cityIndex")
@@ -23,10 +25,10 @@ func main() {
 		AddField(redisearch.NewGeoField("location"))
 
 	// Drop an existing index. If the index does not exist an error is returned
-	c.Drop()
+	c.Drop(ctx)
 
 	// Create the index with the given schema
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(ctx, sc); err != nil {
 		log.Fatal(err)
 	}
 
@@ -43,12 +45,12 @@ func main() {
 		Set("location", "15.087269,37.502669")
 
 	// Index the documents. The API accepts multiple documents at a time
-	if err := c.IndexOptions(redisearch.DefaultIndexingOptions, docPalermo, docCatania); err != nil {
+	if err := c.IndexOptions(ctx, redisearch.DefaultIndexingOptions, docPalermo, docCatania); err != nil {
 		log.Fatal(err)
 	}
 
 	// Searching for 100KM radius should only output Catania
-	docs, _, _ := c.Search(redisearch.NewQuery("*").AddFilter(
+	docs, _, _ := c.Search(ctx, redisearch.NewQuery("*").AddFilter(
 		redisearch.Filter{
 			Field: "location",
 			Options: redisearch.GeoFilterOptions{
@@ -66,7 +68,7 @@ func main() {
 	// Output: {doc:Catania 1 [] map[location:15.087269,37.502669 name:Catania]}
 
 	// Searching for 200KM radius should output Catania and Palermo
-	docs, _, _ = c.Search(redisearch.NewQuery("*").AddFilter(
+	docs, _, _ = c.Search(ctx, redisearch.NewQuery("*").AddFilter(
 		redisearch.Filter{
 			Field: "location",
 			Options: redisearch.GeoFilterOptions{

@@ -3,6 +3,7 @@ package redisearch
 import (
 	"bufio"
 	"compress/bzip2"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -42,8 +43,8 @@ func init() {
 
 		sc := NewSchema(DefaultOptions).
 			AddField(NewTextField("foo"))
-		c.Drop()
-		if err := c.CreateIndex(sc); err != nil {
+		c.Drop(defaultCtx)
+		if err := c.CreateIndex(context.Background(), sc); err != nil {
 			log.Fatal(err)
 		}
 		ndocs := 10000
@@ -52,7 +53,7 @@ func init() {
 			docs[i] = NewDocument(fmt.Sprintf("bench.ft.aggregate.doc%d", i), 1).Set("foo", "hello world")
 		}
 
-		if err := c.IndexOptions(DefaultIndexingOptions, docs...); err != nil {
+		if err := c.IndexOptions(defaultCtx, DefaultIndexingOptions, docs...); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -61,15 +62,15 @@ func init() {
 
 func benchmarkAggregate(c *Client, q *AggregateQuery, b *testing.B) {
 	for n := 0; n < b.N; n++ {
-		c.Aggregate(q)
+		c.Aggregate(defaultCtx, q)
 	}
 }
 
 func benchmarkAggregateCursor(c *Client, q *AggregateQuery, b *testing.B) {
 	for n := 0; n < b.N; n++ {
-		c.Aggregate(q)
+		c.Aggregate(defaultCtx, q)
 		for q.CursorHasResults() {
-			c.Aggregate(q)
+			c.Aggregate(defaultCtx, q)
 		}
 	}
 }
@@ -127,7 +128,7 @@ func AddValues(c *Client) {
 		docPos = docPos + 1
 	}
 
-	if err := c.IndexOptions(DefaultIndexingOptions, docs...); err != nil {
+	if err := c.IndexOptions(defaultCtx, DefaultIndexingOptions, docs...); err != nil {
 		log.Fatal(err)
 	}
 
@@ -144,8 +145,8 @@ func _init() {
 		AddField(NewSortableNumericField("price")).
 		AddField(NewTagField("categories"))
 
-	c.Drop()
-	c.CreateIndex(sc)
+	c.Drop(defaultCtx)
+	c.CreateIndex(context.Background(), sc)
 
 	AddValues(c)
 }
@@ -158,14 +159,14 @@ func TestAggregateSortByMax(t *testing.T) {
 		SetMax(60).
 		SortBy([]SortingKey{*NewSortingKeyDir("@price", false)})
 
-	res, _, err := c.Aggregate(q1)
+	res, _, err := c.Aggregate(defaultCtx, q1)
 	assert.Nil(t, err)
 	f1, _ := strconv.ParseFloat(res[0][1], 64)
 	f2, _ := strconv.ParseFloat(res[1][1], 64)
 	assert.GreaterOrEqual(t, f1, f2)
 	assert.Less(t, f1, 696.0)
 
-	_, rep, err := c.AggregateQuery(q1)
+	_, rep, err := c.AggregateQuery(defaultCtx, q1)
 	assert.Nil(t, err)
 	f1, _ = strconv.ParseFloat(rep[0]["price"].(string), 64)
 	f2, _ = strconv.ParseFloat(rep[1]["price"].(string), 64)
@@ -185,11 +186,11 @@ func TestAggregateGroupBy(t *testing.T) {
 		SortBy([]SortingKey{*NewSortingKeyDir("@count", false)}).
 		Limit(0, 5)
 
-	_, count, err := c.Aggregate(q1)
+	_, count, err := c.Aggregate(defaultCtx, q1)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, count)
 
-	count, _, err = c.AggregateQuery(q1)
+	count, _, err = c.AggregateQuery(defaultCtx, q1)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, count)
 }
@@ -204,7 +205,7 @@ func TestAggregateMinMax(t *testing.T) {
 			Reduce(*NewReducerAlias(GroupByReducerMin, []string{"@price"}, "minPrice"))).
 		SortBy([]SortingKey{*NewSortingKeyDir("@minPrice", false)})
 
-	res, _, err := c.Aggregate(q1)
+	res, _, err := c.Aggregate(defaultCtx, q1)
 	assert.Nil(t, err)
 	row := res[0]
 	fmt.Println(row)
@@ -212,7 +213,7 @@ func TestAggregateMinMax(t *testing.T) {
 	assert.GreaterOrEqual(t, f, 88.0)
 	assert.Less(t, f, 89.0)
 
-	_, rep, err := c.AggregateQuery(q1)
+	_, rep, err := c.AggregateQuery(defaultCtx, q1)
 	assert.Nil(t, err)
 	fmt.Println(rep[0])
 	f, _ = strconv.ParseFloat(rep[0]["minPrice"].(string), 64)
@@ -225,14 +226,14 @@ func TestAggregateMinMax(t *testing.T) {
 			Reduce(*NewReducerAlias(GroupByReducerMax, []string{"@price"}, "maxPrice"))).
 		SortBy([]SortingKey{*NewSortingKeyDir("@maxPrice", false)})
 
-	res, _, err = c.Aggregate(q2)
+	res, _, err = c.Aggregate(defaultCtx, q2)
 	assert.Nil(t, err)
 	row = res[0]
 	f, _ = strconv.ParseFloat(row[5], 64)
 	assert.GreaterOrEqual(t, f, 695.0)
 	assert.Less(t, f, 696.0)
 
-	_, rep, err = c.AggregateQuery(q2)
+	_, rep, err = c.AggregateQuery(defaultCtx, q2)
 	assert.Nil(t, err)
 	f, _ = strconv.ParseFloat(rep[0]["maxPrice"].(string), 64)
 	assert.GreaterOrEqual(t, f, 695.0)
@@ -248,12 +249,12 @@ func TestAggregateCountDistinct(t *testing.T) {
 			Reduce(*NewReducer(GroupByReducerCountDistinct, []string{"@title"}).SetAlias("count_distinct(title)")).
 			Reduce(*NewReducer(GroupByReducerCount, []string{})))
 
-	res, _, err := c.Aggregate(q1)
+	res, _, err := c.Aggregate(defaultCtx, q1)
 	assert.Nil(t, err)
 	row := res[0]
 	assert.Equal(t, "1484", row[3])
 
-	_, rep, err := c.AggregateQuery(q1)
+	_, rep, err := c.AggregateQuery(defaultCtx, q1)
 	assert.Nil(t, err)
 	assert.Equal(t, "1484", rep[0]["count_distinct(title)"])
 }
@@ -266,7 +267,7 @@ func TestAggregateToList(t *testing.T) {
 		GroupBy(*NewGroupBy().AddFields("@brand").
 			Reduce(*NewReducer(GroupByReducerToList, []string{"@brand"})))
 
-	total, reply, err := c.AggregateQuery(q1) // Can't be used with Aggregate when using ToList!
+	total, reply, err := c.AggregateQuery(defaultCtx, q1) // Can't be used with Aggregate when using ToList!
 	assert.Nil(t, err)
 	assert.Equal(t, 292, total)
 	_, ok := reply[0]["brand"].(string)
@@ -284,14 +285,14 @@ func TestAggregateFilter(t *testing.T) {
 			Reduce(*NewReducerAlias(GroupByReducerCount, []string{}, "count"))).
 		Filter("@count > 5")
 
-	res, _, err := c.Aggregate(q1)
+	res, _, err := c.Aggregate(defaultCtx, q1)
 	assert.Nil(t, err)
 	for _, row := range res {
 		f, _ := strconv.ParseFloat(row[3], 64)
 		assert.Greater(t, f, 5.0)
 	}
 
-	_, rep, err := c.AggregateQuery(q1)
+	_, rep, err := c.AggregateQuery(defaultCtx, q1)
 	assert.Nil(t, err)
 	for _, row := range rep {
 		f, _ := strconv.ParseFloat(row["count"].(string), 64)
@@ -308,13 +309,13 @@ func TestAggregateApply(t *testing.T) {
 			Reduce(*NewReducerAlias(GroupByReducerCount, []string{}, "count"))).
 		Apply(*NewProjection("@count/2", "halfCount"))
 
-	res, _, err := c.Aggregate(q1)
+	res, _, err := c.Aggregate(defaultCtx, q1)
 	assert.Nil(t, err)
 	count, _ := strconv.ParseFloat(res[0][3], 64)
 	halfCount, _ := strconv.ParseFloat(res[0][5], 64)
 	assert.Equal(t, halfCount*2, count)
 
-	_, rep, err := c.AggregateQuery(q1)
+	_, rep, err := c.AggregateQuery(defaultCtx, q1)
 	assert.Nil(t, err)
 	count, _ = strconv.ParseFloat(rep[0]["count"].(string), 64)
 	halfCount, _ = strconv.ParseFloat(rep[0]["halfCount"].(string), 64)

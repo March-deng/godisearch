@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -14,6 +15,7 @@ import (
  * Because such indexes are lightweight, you can create thousands of such indexes without negative performance implications.
  */
 func main() {
+	ctx := context.Background()
 	// Create a client. By default a client is schemaless
 	// unless a schema is provided when creating the index
 	c := redisearch.NewClient("localhost:6379", "myTemporaryIndex")
@@ -25,10 +27,10 @@ func main() {
 		AddField(redisearch.NewNumericField("date"))
 
 	// Drop an existing index. If the index does not exist an error is returned
-	c.Drop()
+	c.Drop(ctx)
 
 	// Create the index with the given schema
-	if err := c.CreateIndex(sc); err != nil {
+	if err := c.CreateIndex(context.Background(), sc); err != nil {
 		log.Fatal(err)
 	}
 
@@ -39,11 +41,11 @@ func main() {
 		Set("date", time.Now().Unix())
 
 	// Index the document. The API accepts multiple documents at a time
-	if err := c.IndexOptions(redisearch.DefaultIndexingOptions, doc); err != nil {
+	if err := c.IndexOptions(ctx, redisearch.DefaultIndexingOptions, doc); err != nil {
 		log.Fatal(err)
 	}
 
-	docs, total, err := c.Search(redisearch.NewQuery("hello world").
+	docs, total, err := c.Search(ctx, redisearch.NewQuery("hello world").
 		Limit(0, 2).
 		SetReturnFields("title"))
 
@@ -53,7 +55,7 @@ func main() {
 
 	time.Sleep(15 * time.Second)
 	// Searching with limit and sorting
-	_, err = c.Info()
+	_, err = c.Info(ctx)
 	fmt.Println(err)
 	// Output: Unknown Index name
 }

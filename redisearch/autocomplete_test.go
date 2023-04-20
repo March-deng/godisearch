@@ -2,10 +2,11 @@ package redisearch
 
 import (
 	"fmt"
-	"github.com/gomodule/redigo/redis"
-	"github.com/stretchr/testify/assert"
 	"reflect"
 	"testing"
+
+	"github.com/gomodule/redigo/redis"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestAutocompleter_Serialize(t *testing.T) {
@@ -63,13 +64,13 @@ func TestSuggest(t *testing.T) {
 		terms[i] = Suggestion{Term: fmt.Sprintf("foo %d", i),
 			Score: 1.0, Payload: fmt.Sprintf("bar %d", i), Incr: true}
 	}
-	err := a.AddTerms(terms...)
+	err := a.AddTerms(defaultCtx, terms...)
 	assert.Nil(t, err)
-	suglen, err := a.Length()
+	suglen, err := a.Length(defaultCtx)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(10), suglen)
 	// Retrieve Terms From Autocompleter - Without Payloads / Scores
-	suggestions, err := a.SuggestOpts("f", SuggestOptions{Num: 10})
+	suggestions, err := a.SuggestOpts(defaultCtx, "f", SuggestOptions{Num: 10})
 	assert.Nil(t, err)
 	assert.Equal(t, 10, len(suggestions))
 	for _, suggestion := range suggestions {
@@ -79,7 +80,7 @@ func TestSuggest(t *testing.T) {
 	}
 
 	// Retrieve Terms From Autocompleter - With Payloads & Scores
-	suggestions, err = a.SuggestOpts("f", SuggestOptions{Num: 10, WithScores: true, WithPayloads: true})
+	suggestions, err = a.SuggestOpts(defaultCtx, "f", SuggestOptions{Num: 10, WithScores: true, WithPayloads: true})
 	assert.Nil(t, err)
 	assert.Equal(t, 10, len(suggestions))
 	for _, suggestion := range suggestions {
@@ -91,8 +92,8 @@ func TestSuggest(t *testing.T) {
 	// Ensure score is incremented according to INCR
 	oldScore := suggestions[0].Score
 
-	err = a.AddTerms(terms...)
-	suggestions, err = a.SuggestOpts("f", SuggestOptions{Num: 10, WithScores: true, WithPayloads: true})
+	err = a.AddTerms(defaultCtx, terms...)
+	suggestions, err = a.SuggestOpts(defaultCtx, "f", SuggestOptions{Num: 10, WithScores: true, WithPayloads: true})
 	assert.Nil(t, err)
 	for _, suggestion := range suggestions {
 		assert.Greater(t, suggestion.Score, oldScore)
@@ -103,8 +104,8 @@ func TestSuggest(t *testing.T) {
 		terms[i].Incr = false
 	}
 
-	err = a.AddTerms(terms...)
-	suggestions, err = a.SuggestOpts("f", SuggestOptions{Num: 10, WithScores: true, WithPayloads: true})
+	err = a.AddTerms(defaultCtx, terms...)
+	suggestions, err = a.SuggestOpts(defaultCtx, "f", SuggestOptions{Num: 10, WithScores: true, WithPayloads: true})
 	assert.Nil(t, err)
 	for _, suggestion := range suggestions {
 		assert.Equal(t, suggestion.Score, oldScore)

@@ -1,6 +1,7 @@
 package redisearch
 
 import (
+	"context"
 	"errors"
 	"log"
 	"reflect"
@@ -19,17 +20,11 @@ type Client struct {
 var maxConns = 500
 
 // NewClient creates a new client connecting to the redis host, and using the given name as key prefix.
-// Addr can be a single host:port pair, or a comma separated list of host:port,host:port...
-// In the case of multiple hosts we create a multi-pool and select connections at random
+// Addr is a single host:port pair
 func NewClient(addr, name string) *Client {
 
-	addrs := strings.Split(addr, ",")
-	var pool ConnPool
-	if len(addrs) == 1 {
-		pool = NewSingleHostPool(addrs[0])
-	} else {
-		pool = NewMultiHostPool(addrs)
-	}
+	pool := NewSingleHostPool(addr)
+
 	ret := &Client{
 		pool: pool,
 		name: name,
@@ -41,25 +36,25 @@ func NewClient(addr, name string) *Client {
 // NewClientFromPool creates a new Client with the given pool and index name
 func NewClientFromPool(pool *redis.Pool, name string) *Client {
 	ret := &Client{
-		pool: pool,
+		pool: &SingleHostPool{Pool: pool},
 		name: name,
 	}
 	return ret
 }
 
 // CreateIndex configures the index and creates it on redis
-func (i *Client) CreateIndex(schema *Schema) (err error) {
-	return i.indexWithDefinition(i.name, schema, nil)
+func (i *Client) CreateIndex(ctx context.Context, schema *Schema) (err error) {
+	return i.indexWithDefinition(ctx, i.name, schema, nil)
 }
 
 // CreateIndexWithIndexDefinition configures the index and creates it on redis
 // IndexDefinition is used to define a index definition for automatic indexing on Hash update
-func (i *Client) CreateIndexWithIndexDefinition(schema *Schema, definition *IndexDefinition) (err error) {
-	return i.indexWithDefinition(i.name, schema, definition)
+func (i *Client) CreateIndexWithIndexDefinition(ctx context.Context, schema *Schema, definition *IndexDefinition) (err error) {
+	return i.indexWithDefinition(ctx, i.name, schema, definition)
 }
 
 // internal method
-func (i *Client) indexWithDefinition(indexName string, schema *Schema, definition *IndexDefinition) (err error) {
+func (i *Client) indexWithDefinition(ctx context.Context, indexName string, schema *Schema, definition *IndexDefinition) (err error) {
 	args := redis.Args{indexName}
 	if definition != nil {
 		args = definition.Serialize(args)
@@ -67,37 +62,47 @@ func (i *Client) indexWithDefinition(indexName string, schema *Schema, definitio
 	// Set flags based on options
 	args, err = SerializeSchema(schema, args)
 	if err != nil {
-		return
+		return err
 	}
-	conn := i.pool.Get()
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 	_, err = conn.Do("FT.CREATE", args...)
 	return
 }
 
 // AddField Adds a new field to the index.
-func (i *Client) AddField(f Field) error {
+func (i *Client) AddField(ctx context.Context, f Field) error {
 	args := redis.Args{i.name}
 	args = append(args, "SCHEMA", "ADD")
 	args, err := serializeField(f, args)
 	if err != nil {
 		return err
 	}
-	conn := i.pool.Get()
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 	_, err = conn.Do("FT.ALTER", args...)
 	return err
 }
 
 // Index indexes a list of documents with the default options
-func (i *Client) Index(docs ...Document) error {
-	return i.IndexOptions(DefaultIndexingOptions, docs...)
+func (i *Client) Index(ctx context.Context, docs ...Document) error {
+	return i.IndexOptions(ctx, DefaultIndexingOptions, docs...)
 }
 
 // Search searches the index for the given query, and returns documents,
 // the total number of results, or an error if something went wrong
-func (i *Client) Search(q *Query) (docs []Document, total int, err error) {
-	conn := i.pool.Get()
+func (i *Client) Search(ctx context.Context, q *Query) (docs []Document, total int, err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	defer conn.Close()
 
 	args := redis.Args{i.name}
@@ -145,8 +150,11 @@ func (i *Client) Search(q *Query) (docs []Document, total int, err error) {
 
 // AliasAdd adds an alias to an index.
 // Indexes can have more than one alias, though an alias cannot refer to another alias.
-func (i *Client) AliasAdd(name string) (err error) {
-	conn := i.pool.Get()
+func (i *Client) AliasAdd(ctx context.Context, name string) (err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 	args := redis.Args{name}.Add(i.name)
 	_, err = redis.String(conn.Do("FT.ALIASADD", args...))
@@ -154,8 +162,11 @@ func (i *Client) AliasAdd(name string) (err error) {
 }
 
 // AliasDel deletes an alias from index.
-func (i *Client) AliasDel(name string) (err error) {
-	conn := i.pool.Get()
+func (i *Client) AliasDel(ctx context.Context, name string) (err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 	args := redis.Args{name}
 	_, err = redis.String(conn.Do("FT.ALIASDEL", args...))
@@ -165,8 +176,11 @@ func (i *Client) AliasDel(name string) (err error) {
 // AliasUpdate differs from the AliasAdd in that it will remove the alias association with
 // a previous index, if any. AliasAdd will fail, on the other hand, if the alias is already
 // associated with another index.
-func (i *Client) AliasUpdate(name string) (err error) {
-	conn := i.pool.Get()
+func (i *Client) AliasUpdate(ctx context.Context, name string) (err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 	args := redis.Args{name}.Add(i.name)
 	_, err = redis.String(conn.Do("FT.ALIASUPDATE", args...))
@@ -174,8 +188,11 @@ func (i *Client) AliasUpdate(name string) (err error) {
 }
 
 // DictAdd adds terms to a dictionary.
-func (i *Client) DictAdd(dictionaryName string, terms []string) (newTerms int, err error) {
-	conn := i.pool.Get()
+func (i *Client) DictAdd(ctx context.Context, dictionaryName string, terms []string) (newTerms int, err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return 0, err
+	}
 	defer conn.Close()
 	newTerms = 0
 	args := redis.Args{dictionaryName}.AddFlat(terms)
@@ -184,8 +201,11 @@ func (i *Client) DictAdd(dictionaryName string, terms []string) (newTerms int, e
 }
 
 // DictDel deletes terms from a dictionary
-func (i *Client) DictDel(dictionaryName string, terms []string) (deletedTerms int, err error) {
-	conn := i.pool.Get()
+func (i *Client) DictDel(ctx context.Context, dictionaryName string, terms []string) (deletedTerms int, err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return 0, err
+	}
 	defer conn.Close()
 	deletedTerms = 0
 	args := redis.Args{dictionaryName}.AddFlat(terms)
@@ -194,8 +214,11 @@ func (i *Client) DictDel(dictionaryName string, terms []string) (deletedTerms in
 }
 
 // DictDump dumps all terms in the given dictionary.
-func (i *Client) DictDump(dictionaryName string) (terms []string, err error) {
-	conn := i.pool.Get()
+func (i *Client) DictDump(ctx context.Context, dictionaryName string) (terms []string, err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 	args := redis.Args{dictionaryName}
 	terms, err = redis.Strings(conn.Do("FT.DICTDUMP", args...))
@@ -204,8 +227,12 @@ func (i *Client) DictDump(dictionaryName string) (terms []string, err error) {
 
 // SpellCheck performs spelling correction on a query, returning suggestions for misspelled terms,
 // the total number of results, or an error if something went wrong
-func (i *Client) SpellCheck(q *Query, s *SpellCheckOptions) (suggs []MisspelledTerm, total int, err error) {
-	conn := i.pool.Get()
+// TODO: add ctx
+func (i *Client) SpellCheck(ctx context.Context, q *Query, s *SpellCheckOptions) (suggs []MisspelledTerm, total int, err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
 	defer conn.Close()
 
 	args := redis.Args{i.name}
@@ -246,8 +273,8 @@ func (i *Client) SpellCheck(q *Query, s *SpellCheckOptions) (suggs []MisspelledT
 }
 
 // Deprecated: Use AggregateQuery() instead.
-func (i *Client) Aggregate(q *AggregateQuery) (aggregateReply [][]string, total int, err error) {
-	res, err := i.aggregate(q)
+func (i *Client) Aggregate(ctx context.Context, q *AggregateQuery) (aggregateReply [][]string, total int, err error) {
+	res, err := i.aggregate(ctx, q)
 
 	// has no cursor
 	if !q.WithCursor {
@@ -268,8 +295,8 @@ func (i *Client) Aggregate(q *AggregateQuery) (aggregateReply [][]string, total 
 }
 
 // AggregateQuery replaces the Aggregate() function. The reply is slice of maps, with values of either string or []string.
-func (i *Client) AggregateQuery(q *AggregateQuery) (total int, aggregateReply []map[string]interface{}, err error) {
-	res, err := i.aggregate(q)
+func (i *Client) AggregateQuery(ctx context.Context, q *AggregateQuery) (total int, aggregateReply []map[string]interface{}, err error) {
+	res, err := i.aggregate(ctx, q)
 
 	// has no cursor
 	if !q.WithCursor {
@@ -289,8 +316,11 @@ func (i *Client) AggregateQuery(q *AggregateQuery) (total int, aggregateReply []
 	return
 }
 
-func (i *Client) aggregate(q *AggregateQuery) (res []interface{}, err error) {
-	conn := i.pool.Get()
+func (i *Client) aggregate(ctx context.Context, q *AggregateQuery) (res []interface{}, err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 	validCursor := q.CursorHasResults()
 	if !validCursor {
@@ -308,9 +338,12 @@ func (i *Client) aggregate(q *AggregateQuery) (res []interface{}, err error) {
 }
 
 // Get - Returns the full contents of a document
-func (i *Client) Get(docId string) (doc *Document, err error) {
+func (i *Client) Get(ctx context.Context, docId string) (doc *Document, err error) {
 	doc = nil
-	conn := i.pool.Get()
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 	var reply interface{}
 	args := redis.Args{i.name, docId}
@@ -333,9 +366,12 @@ func (i *Client) Get(docId string) (doc *Document, err error) {
 // MultiGet - Returns the full contents of multiple documents.
 // Returns an array with exactly the same number of elements as the number of keys sent to the command.
 // Each element in it is either an Document or nil if it was not found.
-func (i *Client) MultiGet(documentIds []string) (docs []*Document, err error) {
+func (i *Client) MultiGet(ctx context.Context, documentIds []string) (docs []*Document, err error) {
 	docs = make([]*Document, len(documentIds))
-	conn := i.pool.Get()
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 	var reply interface{}
 	args := redis.Args{i.name}.AddFlat(documentIds)
@@ -368,8 +404,11 @@ func (i *Client) MultiGet(documentIds []string) (docs []*Document, err error) {
 }
 
 // Explain Return a textual string explaining the query (execution plan)
-func (i *Client) Explain(q *Query) (string, error) {
-	conn := i.pool.Get()
+func (i *Client) Explain(ctx context.Context, q *Query) (string, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return "", err
+	}
 	defer conn.Close()
 
 	args := redis.Args{i.name}
@@ -379,11 +418,14 @@ func (i *Client) Explain(q *Query) (string, error) {
 }
 
 // Drop deletes the index and all the keys associated with it.
-func (i *Client) Drop() error {
-	conn := i.pool.Get()
+func (i *Client) Drop(ctx context.Context) error {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 
-	_, err := conn.Do("FT.DROP", i.name)
+	_, err = conn.Do("FT.DROP", i.name)
 	return err
 }
 
@@ -393,10 +435,12 @@ func (i *Client) Drop() error {
 //
 // By default, DropIndex() which is a wrapper for RediSearch FT.DROPINDEX does not delete the document
 // hashes associated with the index. Setting the argument deleteDocuments to true deletes the hashes as well.
-func (i *Client) DropIndex(deleteDocuments bool) error {
-	conn := i.pool.Get()
+func (i *Client) DropIndex(ctx context.Context, deleteDocuments bool) error {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
-	var err error = nil
 	if deleteDocuments {
 		_, err = conn.Do("FT.DROPINDEX", i.name, "DD")
 	} else {
@@ -408,18 +452,21 @@ func (i *Client) DropIndex(deleteDocuments bool) error {
 // Delete the document from the index, optionally delete the actual document
 // WARNING: As of RediSearch 2.0 and above, FT.DEL always deletes the underlying document.
 // Deprecated: This function  is deprecated on RediSearch 2.0 and above, use DeleteDocument() instead
-func (i *Client) Delete(docId string, deleteDocument bool) (err error) {
-	return i.delDoc(docId, deleteDocument)
+func (i *Client) Delete(ctx context.Context, docId string, deleteDocument bool) (err error) {
+	return i.delDoc(ctx, docId, deleteDocument)
 }
 
 // DeleteDocument delete the document from the index and also delete the HASH key in which the document is stored
-func (i *Client) DeleteDocument(docId string) (err error) {
-	return i.delDoc(docId, true)
+func (i *Client) DeleteDocument(ctx context.Context, docId string) (err error) {
+	return i.delDoc(ctx, docId, true)
 }
 
 // Internal method to be used by Delete() and DeleteDocument()
-func (i *Client) delDoc(docId string, deleteDocument bool) (err error) {
-	conn := i.pool.Get()
+func (i *Client) delDoc(ctx context.Context, docId string, deleteDocument bool) (err error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 	if deleteDocument {
 		_, err = conn.Do("FT.DEL", i.name, docId, "DD")
@@ -597,8 +644,11 @@ func (info *IndexInfo) loadSchema(values []interface{}, options []string) {
 
 // Info - Get information about the index. This can also be used to check if the
 // index exists
-func (i *Client) Info() (*IndexInfo, error) {
-	conn := i.pool.Get()
+func (i *Client) Info(ctx context.Context) (*IndexInfo, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 
 	res, err := redis.Values(conn.Do("FT.INFO", i.name))
@@ -633,8 +683,11 @@ func (i *Client) Info() (*IndexInfo, error) {
 }
 
 // Set runtime configuration option
-func (i *Client) SetConfig(option string, value string) (string, error) {
-	conn := i.pool.Get()
+func (i *Client) SetConfig(ctx context.Context, option string, value string) (string, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return "", err
+	}
 	defer conn.Close()
 
 	args := redis.Args{"SET", option, value}
@@ -642,8 +695,11 @@ func (i *Client) SetConfig(option string, value string) (string, error) {
 }
 
 // Get runtime configuration option value
-func (i *Client) GetConfig(option string) (map[string]string, error) {
-	conn := i.pool.Get()
+func (i *Client) GetConfig(ctx context.Context, option string) (map[string]string, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 
 	args := redis.Args{"GET", option}
@@ -664,8 +720,11 @@ func (i *Client) GetConfig(option string) (map[string]string, error) {
 }
 
 // Get the distinct tags indexed in a Tag field
-func (i *Client) GetTagVals(index string, filedName string) ([]string, error) {
-	conn := i.pool.Get()
+func (i *Client) GetTagVals(ctx context.Context, index string, filedName string) ([]string, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 
 	args := redis.Args{index, filedName}
@@ -674,8 +733,11 @@ func (i *Client) GetTagVals(index string, filedName string) ([]string, error) {
 
 // SynAdd adds a synonym group.
 // Deprecated: This function is not longer supported on RediSearch 2.0 and above, use SynUpdate instead
-func (i *Client) SynAdd(indexName string, terms []string) (int64, error) {
-	conn := i.pool.Get()
+func (i *Client) SynAdd(ctx context.Context, indexName string, terms []string) (int64, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return 0, err
+	}
 	defer conn.Close()
 
 	args := redis.Args{indexName}.AddFlat(terms)
@@ -683,8 +745,11 @@ func (i *Client) SynAdd(indexName string, terms []string) (int64, error) {
 }
 
 // SynUpdate updates a synonym group, with additional terms.
-func (i *Client) SynUpdate(indexName string, synonymGroupId int64, terms []string) (string, error) {
-	conn := i.pool.Get()
+func (i *Client) SynUpdate(ctx context.Context, indexName string, synonymGroupId int64, terms []string) (string, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return "", err
+	}
 	defer conn.Close()
 
 	args := redis.Args{indexName, synonymGroupId}.AddFlat(terms)
@@ -692,8 +757,11 @@ func (i *Client) SynUpdate(indexName string, synonymGroupId int64, terms []strin
 }
 
 // SynDump dumps the contents of a synonym group.
-func (i *Client) SynDump(indexName string) (map[string][]int64, error) {
-	conn := i.pool.Get()
+func (i *Client) SynDump(ctx context.Context, indexName string) (map[string][]int64, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 
 	args := redis.Args{indexName}
@@ -722,8 +790,11 @@ func (i *Client) SynDump(indexName string) (map[string][]int64, error) {
 // Adds a document to the index from an existing HASH key in Redis.
 // Deprecated: This function is not longer supported on RediSearch 2.0 and above, use HSET instead
 // See the example ExampleClient_CreateIndexWithIndexDefinition for a deeper understanding on how to move towards using hashes on your application
-func (i *Client) AddHash(docId string, score float32, language string, replace bool) (string, error) {
-	conn := i.pool.Get()
+func (i *Client) AddHash(ctx context.Context, docId string, score float32, language string, replace bool) (string, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return "", err
+	}
 	defer conn.Close()
 
 	args := redis.Args{i.name, docId, score}
@@ -738,8 +809,11 @@ func (i *Client) AddHash(docId string, score float32, language string, replace b
 }
 
 // Returns a list of all existing indexes.
-func (i *Client) List() ([]string, error) {
-	conn := i.pool.Get()
+func (i *Client) List(ctx context.Context) ([]string, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
 
 	res, err := redis.Values(conn.Do("FT._LIST"))
