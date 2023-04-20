@@ -95,6 +95,102 @@ func (i *Client) Index(ctx context.Context, docs ...Document) error {
 	return i.IndexOptions(ctx, DefaultIndexingOptions, docs...)
 }
 
+// AddDoc add doc to redis with HSETNX command, the Score and Payload field will be ignored.
+func (i *Client) AddDoc(ctx context.Context, docs ...Document) error {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	n := 0
+	var merr MultiError
+
+	for i, doc := range docs {
+		args := make(redis.Args, 0, 1+2*len(doc.Properties))
+		args = append(args, doc.Id)
+		for k, f := range doc.Properties {
+			args = append(args, k, f)
+		}
+
+		if err := conn.Send("HSET", args...); err != nil {
+			if merr == nil {
+				merr = NewMultiError(len(docs))
+			}
+			merr[i] = err
+			return merr
+		}
+		n++
+	}
+
+	if err := conn.Flush(); err != nil {
+		return err
+	}
+
+	for n > 0 {
+		if _, err := conn.Receive(); err != nil {
+			if merr == nil {
+				merr = NewMultiError(len(docs))
+			}
+			merr[n-1] = err
+		}
+		n--
+	}
+
+	if merr == nil {
+		return nil
+	}
+
+	return merr
+}
+
+// DeleteDoc delete doc by keys with DEL command
+func (i *Client) DeleteDoc(ctx context.Context, keys ...string) error {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	args := make(redis.Args, 0, len(keys))
+	for _, key := range keys {
+		args = append(args, key)
+	}
+
+	_, err = conn.Do("DEL", args...)
+	return err
+}
+
+func (i *Client) GetDoc(ctx context.Context, docID string) (*Document, error) {
+	conn, err := i.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	reply, err := conn.Do("HGETALL", docID)
+	if err != nil {
+		return nil, err
+	}
+
+	var doc *Document
+
+	if reply != nil {
+		var array_reply []interface{}
+		array_reply, err = redis.Values(reply, err)
+		if err != nil {
+			return nil, err
+		}
+		if len(array_reply) > 0 {
+			document := NewDocument(docID, 0)
+			document.loadFields(array_reply)
+			doc = &document
+		}
+	}
+	return doc, nil
+
+}
+
 // Search searches the index for the given query, and returns documents,
 // the total number of results, or an error if something went wrong
 func (i *Client) Search(ctx context.Context, q *Query) (docs []Document, total int, err error) {
@@ -227,7 +323,6 @@ func (i *Client) DictDump(ctx context.Context, dictionaryName string) (terms []s
 
 // SpellCheck performs spelling correction on a query, returning suggestions for misspelled terms,
 // the total number of results, or an error if something went wrong
-// TODO: add ctx
 func (i *Client) SpellCheck(ctx context.Context, q *Query, s *SpellCheckOptions) (suggs []MisspelledTerm, total int, err error) {
 	conn, err := i.pool.Get(ctx)
 	if err != nil {

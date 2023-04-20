@@ -2,8 +2,10 @@ package redisearch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1270,4 +1272,116 @@ func TestClient_InfoFieldsTest(t *testing.T) {
 				Field{Name: "type", Type: 3, Sortable: true, Options: TagFieldOptions{Separator: 44, NoIndex: true, Sortable: true, CaseSensitive: true, As: "tag"}},
 			}),
 		info.Schema.Fields)
+}
+
+func TestClient_AddAndDeleteSingleDoc(t *testing.T) {
+	c := createClient("doc")
+	flush(c)
+	doc := Document{
+		Id: "Doc:1",
+		Properties: map[string]interface{}{
+			"updated_at": strconv.Itoa(int(time.Now().Unix())),
+			"id":         "1",
+			"name":       "test1",
+			"namespace":  "default",
+		},
+	}
+
+	err := c.AddDoc(context.Background(), doc)
+	assert.Nil(t, err)
+
+	gotDoc, err := c.GetDoc(defaultCtx, doc.Id)
+	assert.Nil(t, err)
+
+	assert.Equal(t, doc, *gotDoc)
+
+}
+
+func TestClient_AddAndDeleteDocs(t *testing.T) {
+	c := createClient("doc")
+	flush(c)
+
+	docs := []Document{
+		{
+			Id: "Doc:1",
+			Properties: map[string]interface{}{
+				"updated_at": strconv.Itoa(int(time.Now().Unix() + 20)),
+				"id":         "1",
+				"name":       "test1",
+				"namespace":  "default",
+			},
+		},
+		{
+			Id: "Doc:2",
+			Properties: map[string]interface{}{
+				"updated_at": strconv.Itoa(int(time.Now().Unix() + 100)),
+				"id":         "2",
+				"name":       "test2",
+				"namespace":  "default",
+			},
+		},
+	}
+
+	err := c.AddDoc(defaultCtx, docs...)
+	assert.Nil(t, err)
+	docID := make([]string, 0)
+
+	for _, doc := range docs {
+		docID = append(docID, doc.Id)
+		gotDoc, err := c.GetDoc(defaultCtx, doc.Id)
+		assert.Nil(t, err)
+		assert.Equal(t, doc, *gotDoc)
+	}
+
+	err = c.DeleteDoc(defaultCtx, docID...)
+	assert.Nil(t, err)
+
+}
+
+func TestClient_IndexDoc(t *testing.T) {
+	c := createClient("doc")
+	flush(c)
+
+	schema := NewSchema(DefaultOptions).AddField(NewTagField("name")).
+		AddField(NewTagField("namespace")).
+		AddField(NewSortableNumericField("updated_at")).
+		AddField(NewSortableNumericField("id")).AddField(NewNumericField("score"))
+
+	indexDefinition := NewIndexDefinition().AddPrefix("Doc:").SetScoreField("score")
+
+	err := c.CreateIndexWithIndexDefinition(defaultCtx, schema, indexDefinition)
+	assert.Nil(t, err)
+
+	docs := []Document{
+		{
+			Id: "Doc:1",
+			Properties: map[string]interface{}{
+				"updated_at": strconv.Itoa(int(time.Now().Unix() + 20)),
+				"id":         "1",
+				"name":       "test1",
+				"namespace":  "default",
+				"score":      2.0,
+			},
+		},
+		{
+			Id: "Doc:2",
+			Properties: map[string]interface{}{
+				"updated_at": strconv.Itoa(int(time.Now().Unix() + 100)),
+				"id":         "2",
+				"name":       "test2",
+				"namespace":  "default",
+				"score":      2.0,
+			},
+		},
+	}
+
+	err = c.AddDoc(defaultCtx, docs...)
+	assert.Nil(t, err)
+
+	searchDocs, total, err := c.Search(defaultCtx, NewQuery("@namespace:{default}"))
+	assert.Nil(t, err)
+	assert.Equal(t, 2, total)
+
+	data, _ := json.Marshal(searchDocs)
+	fmt.Println(string(data))
 }
