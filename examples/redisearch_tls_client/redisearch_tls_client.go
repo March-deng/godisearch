@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/RediSearch/redisearch-go/v2/redisearch"
+	"github.com/March-deng/godisearch/redisearch"
 	"github.com/gomodule/redigo/redis"
 )
 

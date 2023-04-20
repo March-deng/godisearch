@@ -1,4 +1,4 @@
-module github.com/RediSearch/redisearch-go/v2
+module github.com/March-deng/godisearch
 
 go 1.20
 
