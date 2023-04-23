@@ -11,6 +11,10 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
+var (
+	ErrDocNotFound = errors.New("document not found")
+)
+
 // Client is an interface to redisearch's redis commands
 type Client struct {
 	pool ConnPool
@@ -176,10 +180,14 @@ func (i *Client) GetDoc(ctx context.Context, docID string) (*Document, error) {
 	var doc *Document
 
 	if reply != nil {
+
 		var array_reply []interface{}
 		array_reply, err = redis.Values(reply, err)
 		if err != nil {
 			return nil, err
+		}
+		if len(array_reply) == 0 {
+			return nil, ErrDocNotFound
 		}
 		if len(array_reply) > 0 {
 			document := NewDocument(docID, 0)
