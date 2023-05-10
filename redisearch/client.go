@@ -45,6 +45,9 @@ func NewClientFromPool(pool *redis.Pool, name string) *Client {
 	}
 	return ret
 }
+func (i *Client) GetConn(ctx context.Context) (redis.Conn, error) {
+	return i.pool.Get(ctx)
+}
 
 // CreateIndex configures the index and creates it on redis
 func (i *Client) CreateIndex(ctx context.Context, schema *Schema) (err error) {
